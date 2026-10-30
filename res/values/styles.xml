@@ -6,9 +6,22 @@
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowAnimationStyle">@null</item>
         <item name="android:windowShowWallpaper">false</item>
-        <item name="android:colorAccent">#e9b872</item>
+        <item name="android:colorAccent">#ffffff</item>
         <item name="android:navigationBarColor">@color/bg</item>
         <item name="android:statusBarColor">@color/bg</item>
+        <!-- Deep, soft shadows under lifted icons, as on tvOS. -->
+        <item name="android:ambientShadowAlpha">0.22</item>
+        <item name="android:spotShadowAlpha">0.6</item>
     </style>
-    <color name="bg">#121115</color>
+    <!-- Apps and Customize: open and close with the tvOS fade-and-zoom. -->
+    <style name="Screen" parent="Home">
+        <item name="android:windowAnimationStyle">@style/ScreenAnimations</item>
+    </style>
+    <style name="ScreenAnimations">
+        <item name="android:activityOpenEnterAnimation">@anim/screen_in</item>
+        <item name="android:activityOpenExitAnimation">@anim/home_out</item>
+        <item name="android:activityCloseEnterAnimation">@anim/home_in</item>
+        <item name="android:activityCloseExitAnimation">@anim/screen_out</item>
+    </style>
+    <color name="bg">#141415</color>
 </resources>

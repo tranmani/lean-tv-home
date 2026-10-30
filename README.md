@@ -4,31 +4,51 @@ A small, fast home screen (launcher) for Android TV and Google TV boxes. It was 
 on an Amlogic S905X4 box (4 GB RAM, Android 14, Google TV; see
 [Tested on](#tested-on)). It should work on any Android TV device running Android 8.0 or newer.
 
-On that box it uses **50 MB of memory instead of 200 MB** for the stock Google TV home screen.
+On that box it uses **60 to 85 MB of memory instead of 200 MB** for the stock Google TV home screen,
+or 40 MB with the lighter Classic layout. While you watch something it lets go of its pictures and
+drops to about 40 to 60 MB.
 
 Google TV's own home screen keeps rows of recommendations, trailers and ads in memory. On a box
 with 2–4 GB of RAM that makes everything slower. Lean TV Home only shows the apps you choose,
 so the box has more memory left for the app you are actually watching.
 
-![Home screen](docs/home.png)
+The home screen is laid out like the Apple TV home screen of tvOS 26: the selected app's Top Shelf
+fills the whole screen behind a glass Dock with the first row of apps, the other rows sit below on
+a blurred copy of the same picture, and the clock floats in a small glass pill. App icons are wide
+rounded cards that lift and shine when selected, scrolling is springy and apps zoom open out of
+their icon. A lighter **Classic** layout is one setting away for slow boxes.
 
-| Warm dark (default) | Paper (light) |
+![Home screen, Apple TV layout](docs/home.png)
+
+| Apple TV layout, Light | Classic layout |
 |---|---|
-| ![Home, warm dark theme](docs/home.png) | ![Home, paper theme](docs/home-paper.png) |
+| ![Home, Apple TV layout, light appearance](docs/home-light.png) | ![Home, Classic layout](docs/home-classic.png) |
+
+Press Up from the Dock to open the Top Shelf. As on tvOS, it pages through trending films and
+shows with their title logo, and OK opens the app:
+
+![Top Shelf, expanded](docs/top-shelf.png)
 
 ![Customize screen](docs/customize.png)
 
 ## Features
 
-- A clock, the date and a grid of your favourite apps. Nothing else runs in the background.
-- **Add / remove apps** and change their order with the remote (hold OK on a tile).
-- **All apps** list for everything else that is installed.
-- **Customize** screen: theme, tile size, app names, clock, date, title, focus effects and which
-  buttons show under the tiles (see [Customize](#customize)).
+- A grid of your favourite apps under a Top Shelf, a clock and the date. Nothing else runs in the
+  background.
+- Motion modelled on tvOS: spring-based focus and scrolling, a small tilt and sheen on the
+  selected icon, a bump at the edges, and apps that zoom open out of their icon.
+- **Add or Remove Apps**, and move apps with the remote (**Rearrange Apps**, or hold OK on an icon and choose **Move**).
+- **Apps** folder with everything else that is installed.
+- **Customize** screen: layout, appearance, icon size, app names, Top Shelf, clock, date, title,
+  motion and which icons show after your apps (see [Customize](#customize)).
+- Two layouts: **Apple TV** (the default) and **Classic**, the lighter look of version 1.3.
 - Optional **Wake-on-LAN**: turn the box (and the TV, through HDMI-CEC) on from your phone or
   computer, even when the box firmware has no Wake-on-LAN (see [Wake-on-LAN](#wake-on-lan)).
 - One button to go back to the Google TV home screen, and one tile to come back.
-- No Google Play Services, no ads, no tracking. The APK is about 90 KB.
+- No Google Play Services, no ads, no tracking. The APK is about 380 KB, most of it the Inter font.
+- The Top Shelf titles come from public Stremio catalogs (Cinemeta, Streaming Catalogs, Kitsu)
+  and are cached on the box, so the shelf still works offline. Set **Top Shelf** to **App Colours**
+  if you want the home screen to make no network requests at all.
 
 ## Tested on
 
@@ -46,25 +66,30 @@ Lean TV Home is built and tested on this box. Every step in this README was run 
 | Stock home screen | Google TV home, `com.google.android.tvlauncher` |
 
 Tested: install with `scripts/install.sh`, the Home button, the Customize settings,
-Add / remove apps, switching to Google TV home and back, and Wake-on-LAN from
+Add or Remove Apps, switching to Google TV home and back, and Wake-on-LAN from
 standby over Ethernet.
 
 ### Memory: Lean TV Home compared with the stock home screen
 
-Measured on the box above on 2026-10-25, each home screen on screen and idle, with the same
+Measured on the box above (Google TV home on 2026-10-25, Lean TV Home 2.1 on 2026-10-29), each
+home screen on screen and idle after moving through the icons, with the same
 apps installed. "Memory used" is the PSS from `adb shell dumpsys meminfo <package>`: the memory
 the app really uses, with shared memory split fairly between apps.
 
-| | Google TV home (stock) | Lean TV Home | Difference |
+| | Google TV home (stock) | Lean TV Home, Apple TV layout | Lean TV Home, Classic layout |
 |---|---|---|---|
-| Memory used by the home screen app (PSS) | 200 MB | 50 MB (Wake-on-LAN on) | **150 MB less, 4 × smaller** |
-| Resident memory (RSS) | 331 MB | 164 MB | 167 MB less |
-| Memory still free for other apps (`MemAvailable`) | 2.10 GB | 2.23 GB | 128 MB more |
-| APK size | (system app) | about 90 KB | |
+| Memory used by the home screen app (PSS) | 200 MB | **61 to 86 MB** | **40 MB** |
+| The same, while another app is on screen | about 200 MB | **41 to 63 MB** | about 40 MB |
+| Resident memory (RSS) | 331 MB | 197 MB | 149 MB |
+| APK size | (system app) | about 380 KB | the same app |
 
-The free-memory difference is a single reading and moves up and down by tens of MB as Android
-starts and stops background work. When you leave Google TV home turned off, it never starts
-again, so the 200 MB stays free while you watch something too.
+Wake-on-LAN was on for both Lean TV Home readings. The Apple TV layout uses more memory because it
+keeps the full-screen Top Shelf pictures ready for the apps in the Dock. When an app opens, the
+home screen drops these pictures and gets them back from its disk cache in about 0.3 seconds
+when you return.
+
+When you leave Google TV home turned off, it never starts again, so that memory stays free while
+you watch something too.
 
 ## Installation
 
@@ -134,7 +159,7 @@ adb devices        # the box must show as "device", not "unauthorized"
 **Quick way (macOS / Linux):** clone this repository or download the `scripts` folder, then run:
 
 ```sh
-scripts/install.sh 192.168.1.50 lean-tv-home-1.3.0.apk
+scripts/install.sh 192.168.1.50 lean-tv-home-2.1.1.apk
 ```
 
 (With Wireless debugging, pass `192.168.1.50:PORT` instead of the bare IP address.)
@@ -149,7 +174,7 @@ address and the file name with yours.
 adb connect 192.168.1.50
 
 # 1. Install
-adb install -r lean-tv-home-1.3.0.apk
+adb install -r lean-tv-home-2.1.1.apk
 
 # 2. Make Lean TV Home the Home app
 adb shell cmd role add-role-holder android.app.role.HOME org.lean.tvhome
@@ -201,16 +226,18 @@ You can install the APK without a computer, for example with the **Downloader** 
 But Google TV still keeps the Home button while its own home screen is on. To turn it off without
 a computer, use an adb app on an Android phone on the same network (search the Play Store for
 "adb shell" or "Bugjaeger"), connect it to the box as in step 4, and run the commands from step 5,
-part 3. Lean TV Home shows these commands too: **Customize → Turn Google TV home off**.
+part 3. Lean TV Home shows these commands too: **Customize → Turn Google TV Home Off**.
 
 ## Using it
 
 | On the home screen | What it does |
 |---|---|
-| Arrow keys and OK | Move between tiles and open an app. |
-| Hold OK on a tile | Menu: Move left, Move right, Move to first place, Remove from home, App info. |
-| **All apps** | Every installed app, A to Z. Hold OK on an app to add it to the home screen or take it off. |
-| **Add / remove apps** | OK on an app adds it to the home screen or takes it off. New apps go to the end; hold OK on a tile to move it. |
+| Arrow keys and OK | Move between icons and open an app. The apps in the Dock (the first row) fill the Top Shelf. |
+| Up from the Dock | Opens the Top Shelf. Left and Right page through its titles; OK opens the app; Down goes back. |
+| Hold OK on an icon, or press Menu | Menu: Move, Remove from Home Screen, App Info, Customize Home Screen. |
+| **Move** | The icon wiggles. Move it with the arrow keys, then press OK (Back cancels). |
+| Back | Returns to the first row. |
+| **Apps** | Every installed app, A to Z. Hold OK on an app to add it to the Home Screen or remove it. |
 | **Customize** | Change the look (see below). |
 | **Settings** | The box's Android settings. |
 
@@ -221,19 +248,20 @@ change on the home screen.
 
 | Setting | Values |
 |---|---|
-| Theme | Warm dark, Midnight, Pure black, Forest, Plum, Paper (light) |
-| Tile size | Small, Medium, Large. The number of columns follows the tile size and the screen width. |
-| App names | Always, Selected tile only, Hidden |
+| Home Screen Layout | **Apple TV** (default), Classic. Classic is the lighter layout of version 1.3: a big clock, card tiles with the app icon inside and a row of buttons. |
+| Appearance | Dark, Midnight, Black, Forest, Plum, Light |
+| Icon Size | Small, Medium, Large (6, 5 or 4 icons per row) |
+| App Names | Selected app only, Always, Hidden |
+| Top Shelf | **Trending Titles** (default): trending films and shows (the app's own list for Netflix, Prime Video, Disney+, Max and Apple TV, anime for anime apps, and the overall top list for other video apps); App Colours: a backdrop drawn from the app's own icon; Off. Apple TV layout only. |
 | Clock | 24-hour, 12-hour, Hidden |
-| Date | Shown, Hidden |
-| Title, top right | Any text, or hidden. Default "LEAN TV · HOME". |
-| Glow behind the selected tile | On, Off |
-| Zoom the selected tile | On, Off |
-| Colour wash on the selected tile | On, Off |
-| Buttons under the tiles | All three, Without Settings, Customize only |
+| Date | Hidden, Shown |
+| Title | Any text, or hidden (the default). |
+| Motion | Full, Reduced (no tilt, wiggle or zoom; smaller lift) |
+| Icons After Your Apps | Apps, Customize, Settings; Apps and Customize; Customize only |
+| Add or Remove Apps | OK on an app puts it on the Home Screen or takes it off. |
 | Wake-on-LAN | On, Off |
-| Use Google TV home instead | Gives the Home button back to Google TV (see below) |
-| Reset the look to defaults | Resets the look. Your apps and their order stay. |
+| Use Google TV Home Instead | Gives the Home button back to Google TV (see below) |
+| Reset the Look | Resets the look. Your apps and their order stay. |
 
 ### Setting things from a computer
 
@@ -247,8 +275,11 @@ adb shell am start -n org.lean.tvhome/.HomeEntry \
 # Wake-on-LAN on, and only for packets addressed to this box
 adb shell am start -n org.lean.tvhome/.HomeEntry --ez wol true --es wol_mac aa:bb:cc:dd:ee:ff
 
-# Title at the top right ('' hides it). Quote the whole command: adb splits it again on the box.
+# Title at the top of the Home Screen ('' hides it). Quote the whole command: adb splits it again on the box.
 adb shell "am start -n org.lean.tvhome/.HomeEntry --es title 'LIVING ROOM'"
+
+# Show an order without saving it (for screenshots); press Home to go back to your own
+adb shell am start -n org.lean.tvhome/.HomeEntry --es preview "com.netflix.ninja,org.jellyfin.androidtv"
 ```
 
 List the package names of the installed apps with `adb shell pm list packages`.
@@ -320,8 +351,7 @@ lets system apps use ports below 1024.
 
 ## Going back to Google TV home
 
-**From the box:** open **Customize → Use Google TV home instead** (or the same entry at the top of
-**Add / remove apps**). If Google TV home is off, the box opens its **App info** page: select
+**From the box:** open **Customize → Use Google TV Home Instead**. If Google TV home is off, the box opens its **App info** page: select
 **Enable**, then press Back. Lean TV Home then gives the Home button back to Google TV.
 
 To come back later, open the **Lean TV Home** tile in Google TV's app list and select
@@ -353,7 +383,8 @@ the Home button does nothing. Run the `pm enable` command above to fix it.
 | `adb devices` shows "unauthorized" | Look at the TV and accept **Allow debugging?**. If you missed it, turn USB debugging off and on again. |
 | `adb connect` says "connection refused" | Network debugging is off, or the box only offers Wireless debugging. See step 2. |
 | `INSTALL_FAILED_UPDATE_INCOMPATIBLE` | A copy signed with another key is installed. Run `adb uninstall org.lean.tvhome`, then install again and repeat step 5. |
-| An app is missing from **Add / remove apps** | Only apps with a TV launcher entry are listed. Phone-only apps you sideloaded may have none. |
+| An app is missing from **Add or Remove Apps** | Only apps with a TV launcher entry are listed. Phone-only apps you sideloaded may have none. |
+| Animations stutter on a slow box | Open **Customize → Home Screen Layout** and choose **Classic**, or set **Motion** to **Reduced**. |
 | Wake-on-LAN does nothing | Check **Customize → Wake-on-LAN** shows "On, port 9009". Send to port 9009, not 9. Check the MAC address. |
 
 ## Building from source
@@ -366,14 +397,14 @@ android-34**:
 ```sh
 sdkmanager "build-tools;35.0.0" "platforms;android-34"
 export ANDROID_HOME=~/android-sdk     # your SDK folder
-./build.sh 13 1.2.0                   # versionCode, versionName
+./build.sh 34 2.1.0                   # versionCode, versionName
 # output: build/lean-tv-home.apk, signed with ~/.android/debug.keystore
 ```
 
 To sign with your own key (alias `release`, the password in a file):
 
 ```sh
-KEYSTORE=~/keys/my-release.jks KEYSTORE_PASS_FILE=~/keys/my-release.pass ./build.sh 13 1.2.0
+KEYSTORE=~/keys/my-release.jks KEYSTORE_PASS_FILE=~/keys/my-release.pass ./build.sh 34 2.1.0
 ```
 
 `art/make-art.py` (Python with Pillow) draws the icon and the TV banner in `res/`.
@@ -382,13 +413,22 @@ KEYSTORE=~/keys/my-release.jks KEYSTORE_PASS_FILE=~/keys/my-release.pass ./build
 
 | File | What it does |
 |---|---|
-| `HomeActivity.java` | The home screen: clock, tile grid, buttons. |
-| `AppsActivity.java` | All apps, and Add / remove apps. |
+| `HomeActivity.java` | The home screen in the Apple TV layout: Top Shelf, icon grid, icon menu. |
+| `Classic.java` | The Classic home screen layout (version 1.3). |
+| `Grid.java`, `Tile.java` | The icon grid (focus, scrolling, moving icons) and one icon. |
+| `Shelf.java` | The Top Shelf: full-screen picture, glass Dock, title logo, clock pill and paging. |
+| `Feed.java` | Top Shelf titles: trending lists from public Stremio catalogs and their pictures, cached on disk. |
+| `Art.java` | Icon pictures, Top Shelf backdrops and the built-in icons, drawn once and cached. |
+| `Motion.java` | Spring curves, the scroll spring, bumps and the move-mode wiggle. |
+| `AppsActivity.java` | The Apps folder, and Add or Remove Apps. |
 | `CustomizeActivity.java`, `Look.java` | The Customize screen and the saved look. |
-| `Apps.java` | Installed apps, the saved tile order, help dialogs. |
+| `Ui.java`, `Overlay.java` | The tvOS-style settings list, full-screen alerts and the icon menu. |
+| `Apps.java` | Installed apps, the saved icon order, help dialogs. |
 | `GoogleHome.java`, `ReturnActivity.java` | Switching the Home button to Google TV and back. |
 | `WakeService.java`, `WakeActivity.java` | Wake-on-LAN. |
-| `Ui.java` | Shared list screen and row style. |
+
+The interface font is [Inter](https://rsms.me/inter/) (SIL Open Font License, see
+[FONT-LICENSE.txt](FONT-LICENSE.txt)), cut down to Latin characters.
 
 ## License
 

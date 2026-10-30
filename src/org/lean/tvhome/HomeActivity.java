@@ -1,46 +1,50 @@
 package org.lean.tvhome;
 
 import android.app.Activity;
-import android.app.AlertDialog;
+import android.app.ActivityOptions;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
+import android.graphics.Bitmap;
 import android.os.Bundle;
 import android.provider.Settings;
-import android.text.TextUtils;
-import android.view.FocusFinder;
-import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.widget.FrameLayout;
-import android.widget.ImageView;
-import android.widget.LinearLayout;
-import android.widget.ScrollView;
-import android.widget.TextClock;
-import android.widget.TextView;
 
+import java.util.ArrayList;
 import java.util.List;
 
-/** The home screen: clock, the owner's app tiles, and a row of utility buttons. */
-public class HomeActivity extends Activity {
-    static final int EASE = 160;
+/**
+ * The home screen, laid out like tvOS: a Top Shelf filling the upper screen for the focused app
+ * in the first row, and a grid of wide icons below it. Hold OK on an icon for its menu.
+ */
+public class HomeActivity extends Activity implements Grid.Listener {
+    /** Keys of the built-in tiles after the apps. */
+    static final String APPS = "#apps", CUSTOMIZE = "#customize", SETTINGS = "#settings";
 
-    private ScrollView scroll;
-    private LinearLayout grid;
-    /** The chip row, fixed under the scrolling grid so it never sits on the screen edge. */
-    private LinearLayout chips;
-    private View glow;
-    private String lastPkg;
+    private FrameLayout root;
+    /** The Classic layout, when chosen in Customize; null for the Apple TV layout. */
+    private Classic classic;
+    private Shelf shelf;
+    private Grid grid;
+    private Object lastKey;
     private int builtGeneration = -1;
     private int lookVersion;
+    private boolean launched;
+    /** An order shown without saving it (the "preview" extra), until Home is pressed. */
+    private List<String> preview;
+    /** Hidden behind an app (onStop until onResume). */
+    private boolean stopped;
+    /** Set by Customize > Rearrange Apps: pick up the first app when the Home Screen shows. */
+    static boolean rearrange;
 
     private final BroadcastReceiver packages = new BroadcastReceiver() {
         @Override
         public void onReceive(Context c, Intent i) {
             Apps.forget();
+            Art.forget();
             if (hasWindowFocus()) build();
         }
     };
@@ -54,72 +58,9 @@ public class HomeActivity extends Activity {
         super.onCreate(state);
         Look.ensure(this);
         lookVersion = Look.version;
-        applyExtras(getIntent());
+        if (state == null) applyExtras(getIntent());
+        else if (state.getString("preview") != null) preview = split(state.getString("preview"));
         WakeService.sync(this);
-
-        FrameLayout root = new FrameLayout(this);
-        root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-            new int[] {Look.bgTop, Look.bgBottom}));
-
-        // Soft tinted light that follows the focused tile.
-        glow = new View(this);
-        GradientDrawable g = new GradientDrawable();
-        g.setGradientType(GradientDrawable.RADIAL_GRADIENT);
-        g.setGradientRadius(dp(210));
-        g.setColors(new int[] {0x33ffffff, 0x00ffffff});
-        glow.setBackground(g);
-        glow.setAlpha(0f);
-        root.addView(glow, new FrameLayout.LayoutParams(dp(420), dp(420)));
-
-        LinearLayout column = new LinearLayout(this);
-        column.setOrientation(LinearLayout.VERTICAL);
-        column.setPadding(dp(56), dp(36), dp(56), 0);
-        root.addView(column, new FrameLayout.LayoutParams(-1, -1));
-
-        column.addView(header(), new LinearLayout.LayoutParams(-1, -2));
-
-        scroll = new ScrollView(this) {
-            // With no tile further down, let focus leave for the chip row at once instead of
-            // spending a key press scrolling to the bottom first.
-            @Override
-            public boolean arrowScroll(int direction) {
-                View f = findFocus();
-                if (f != null && FocusFinder.getInstance().findNextFocus(this, f, direction) == null) {
-                    return false;
-                }
-                return super.arrowScroll(direction);
-            }
-        };
-        scroll.setVerticalScrollBarEnabled(false);
-        scroll.setClipToPadding(false);
-        scroll.setClipChildren(false);
-        scroll.setSmoothScrollingEnabled(true);
-        // The fading edge also keeps a scrolled-to tile this far from the edge, so its zoom and
-        // border are never cut off, and the row peeking in from above or below fades out.
-        scroll.setVerticalFadingEdgeEnabled(true);
-        scroll.setFadingEdgeLength(dp(40));
-        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, 0, 1f);
-        sp.topMargin = dp(18);
-        column.addView(scroll, sp);
-
-        chips = new LinearLayout(this);
-        chips.setOrientation(LinearLayout.HORIZONTAL);
-        chips.setClipChildren(false);
-        chips.setPadding(dp(10), 0, dp(10), 0);
-        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-1, -2);
-        cp.topMargin = dp(14);
-        cp.bottomMargin = dp(32);
-        column.addView(chips, cp);
-
-        grid = new LinearLayout(this);
-        grid.setOrientation(LinearLayout.VERTICAL);
-        grid.setClipChildren(false);
-        grid.setClipToPadding(false);
-        grid.setPadding(dp(10), dp(14), dp(10), dp(20));
-        scroll.addView(grid, new FrameLayout.LayoutParams(-1, -2));
-        scroll.setOnScrollChangeListener((v, x, y, ox, oy) -> placeGlow(getCurrentFocus(), false));
-
-        setContentView(root);
 
         IntentFilter f = new IntentFilter();
         f.addAction(Intent.ACTION_PACKAGE_ADDED);
@@ -127,42 +68,74 @@ public class HomeActivity extends Activity {
         f.addAction(Intent.ACTION_PACKAGE_CHANGED);
         f.addDataScheme("package");
         registerReceiver(packages, f);
+
+        if (Look.layout == 1) {
+            classic = new Classic(this);
+            setContentView(classic.view());
+            return;
+        }
+
+        root = new FrameLayout(this);
+        // One flat colour: the shelf bitmap carries the gradient, and a full-screen gradient
+        // drawable costs several milliseconds a frame on a TV box GPU.
+        root.setBackgroundColor(Look.bgBottom);
+        getWindow().setBackgroundDrawable(null);
+        root.setClipChildren(false);
+        int sh = getResources().getDisplayMetrics().heightPixels;
+        int sw = getResources().getDisplayMetrics().widthPixels;
+
+        shelf = new Shelf(this, sw, sh);
+        if (Look.shelf == 2) shelf.hideArt();
+        root.addView(shelf, new FrameLayout.LayoutParams(-1, -1));
+
+        grid = new Grid(this);
+        grid.setListener(this);
+        // tvOS 26 geometry: six icons across with wide margins, the first row in a glass Dock
+        // near the bottom and the top of the next row peeking in under it.
+        grid.measure(sw, dp(50), Look.columns(), 0.029f);
+        grid.quietTopRow = Look.shelf != 2;
+        grid.top = Look.shelf != 2 ? sh - dp(14) - grid.pitch : dp(96);
+        grid.anchor = Math.round(sh * 0.4f);
+        int pad = Math.round(grid.tileH * 0.28f);
+        shelf.setDock(dp(25), grid.top - pad, sw - dp(25), grid.top + grid.tileH + pad);
+        root.addView(grid, new FrameLayout.LayoutParams(-1, -1));
+        setContentView(root);
+        int probe = getIntent().getIntExtra("perf", 0);
+        if (probe != 0) shelf.probe(probe, root);
     }
 
-    private View header() {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.BOTTOM);
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (shelf != null) {
+            shelf.setRunning(false);
+            root.removeCallbacks(idle);
+        }
+    }
 
-        LinearLayout left = new LinearLayout(this);
-        left.setOrientation(LinearLayout.VERTICAL);
-        TextClock clock = new TextClock(this);
-        String clockFormat = Look.clock == 1 ? "h:mm" : "H:mm";
-        clock.setFormat24Hour(clockFormat);
-        clock.setFormat12Hour(clockFormat);
-        clock.setTextColor(Look.ink);
-        clock.setTypeface(Typeface.create("sans-serif-thin", Typeface.NORMAL));
-        clock.setTextSize(64);
-        clock.setIncludeFontPadding(false);
-        if (Look.clock != 2) left.addView(clock);
-        TextClock date = new TextClock(this);
-        date.setFormat24Hour("EEEE d MMMM");
-        date.setFormat12Hour("EEEE d MMMM");
-        date.setTextColor(Look.inkSoft);
-        date.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
-        date.setTextSize(17);
-        if (Look.date == 0) left.addView(date);
-        row.addView(left, new LinearLayout.LayoutParams(0, -2, 1f));
+    @Override
+    protected void onStop() {
+        super.onStop();
+        stopped = true;
+        if (shelf == null) return;
+        shelf.release();
+        // The pictures' native and GPU memory is only returned when the Java objects are
+        // collected; collect once now rather than whenever the heap next fills up.
+        root.postDelayed(() -> Runtime.getRuntime().gc(), 1500);
+    }
 
-        TextView brand = new TextView(this);
-        brand.setText(Look.title);
-        brand.setTextColor(Look.inkSoft);
-        brand.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
-        brand.setTextSize(14);
-        brand.setLetterSpacing(0.32f);
-        brand.setPadding(0, 0, 0, dp(6));
-        if (!Look.title.trim().isEmpty()) row.addView(brand);
-        return row;
+    /** After a while without a key press on the Dock, the artwork takes the screen, as on tvOS. */
+    private final Runnable idle = () -> {
+        if (shelf != null && hasWindowFocus() && grid.row(grid.focusIndex()) == 0 && !grid.isMoving()
+            && Look.motion == 0) {
+            shelf.expand(true, grid);
+        }
+    };
+
+    private void poke() {
+        if (shelf == null) return;
+        root.removeCallbacks(idle);
+        if (Look.shelf == 0) root.postDelayed(idle, 15000);
     }
 
     @Override
@@ -173,32 +146,69 @@ public class HomeActivity extends Activity {
             recreate();
             return;
         }
-        if (builtGeneration != Apps.generation || grid.getChildCount() == 0) build();
+        if (classic != null) {
+            if (builtGeneration != Apps.generation || classic.empty()) build();
+            return;
+        }
+        stopped = false;
+        if (builtGeneration != Apps.generation || grid.count() == 0) build();
+        shelf.restore();
+        shelf.setRunning(true);
+        poke();
+        if (rearrange) {
+            rearrange = false;
+            startRearrange();
+        }
+        if (launched) {
+            launched = false;
+            // Back from an app: the home screen settles into place, as tvOS zooms back to it.
+            if (Look.motion == 0) {
+                root.setScaleX(1.05f);
+                root.setScaleY(1.05f);
+                root.setAlpha(0.5f);
+                root.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(480)
+                    .setInterpolator(Motion.EASE_OUT).start();
+            }
+        }
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        // The Home key's own intent carries Android's extras too, so look for ours by name.
+        boolean fromAdb = false;
+        for (String k : new String[] {"order", "preview", "title", "wol", "wol_mac"}) {
+            if (intent != null && intent.hasExtra(k)) fromAdb = true;
+        }
+        if (!fromAdb && preview != null) {
+            preview = null;
+            builtGeneration = -1;
+        }
         boolean changed = applyExtras(intent);
         if (lookVersion != Look.version) {
-            // A new title from adb: redraw like after Customize.
             recreate();
             return;
         }
-        if (changed) build();
-        // Home pressed while already home: jump back to the first tile.
-        lastPkg = null;
-        scroll.smoothScrollTo(0, 0);
-        View first = grid.findViewWithTag("tile0");
-        if (first != null) first.requestFocus();
+        if (classic != null) {
+            if (changed || builtGeneration != Apps.generation) build();
+            classic.home();
+            return;
+        }
+        if (grid.isMoving()) grid.endMove(true);
+        shelf.collapse(grid);
+        if (changed || builtGeneration != Apps.generation) build();
+        // Home pressed while already home: back to the first icon and the Top Shelf. Coming
+        // back from an app, the icon that opened it keeps the focus, as on tvOS.
+        if (!stopped) grid.focusAt(0, false);
     }
 
     /**
      * Setup from a computer, for example
      * {@code adb shell am start -n org.lean.tvhome/.HomeEntry --es order "pkg1,pkg2"}.
-     * {@code order} replaces the tile list; {@code wol} (boolean, {@code --ez}) turns Wake-on-LAN on
-     * or off; {@code wol_mac} sets the box's network address for it; {@code title} sets the title at
-     * the top right ("" hides it). Returns true if the tile list changed.
+     * {@code order} replaces the icon list; {@code preview} shows a list without saving it (until
+     * Home is pressed); {@code wol} (boolean, {@code --ez}) turns Wake-on-LAN on or off;
+     * {@code wol_mac} sets the box's network address for it; {@code title} sets the small title at
+     * the top left ("" hides it). Returns true if the icon list changed.
      */
     private boolean applyExtras(Intent i) {
         if (i == null) return false;
@@ -207,16 +217,35 @@ public class HomeActivity extends Activity {
         if (i.hasExtra("wol")) WakeService.setEnabled(this, i.getBooleanExtra("wol", false));
         String title = i.getStringExtra("title");
         if (title != null) Look.setTitle(this, title);
+        String p = i.getStringExtra("preview");
+        if (p != null) {
+            preview = split(p);
+            lastKey = null;
+            if (classic != null) classic.forgetFocus();
+            return true;
+        }
         String order = i.getStringExtra("order");
         if (order == null) return false;
-        List<String> list = new java.util.ArrayList<>();
-        for (String p : order.split(",")) {
+        Apps.save(this, split(order));
+        preview = null;
+        lastKey = null;
+        return true;
+    }
+
+    private static List<String> split(String s) {
+        List<String> list = new ArrayList<>();
+        for (String p : s.split(",")) {
             p = p.trim();
             if (!p.isEmpty() && !list.contains(p)) list.add(p);
         }
-        Apps.save(this, list);
-        lastPkg = null;
-        return true;
+        return list;
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle out) {
+        super.onSaveInstanceState(out);
+        // A look change recreates the screen; keep a preview shown across it.
+        if (preview != null) out.putString("preview", String.join(",", preview));
     }
 
     @Override
@@ -226,248 +255,258 @@ public class HomeActivity extends Activity {
     }
 
     @Override
-    public void onBackPressed() {
-        // Home has nothing behind it.
+    public boolean dispatchKeyEvent(KeyEvent e) {
+        if (classic != null) return classic.key(e) || super.dispatchKeyEvent(e);
+        poke();
+        if (shelfKey(e)) return true;
+        if (e.getKeyCode() == KeyEvent.KEYCODE_MENU) {
+            if (e.getAction() == KeyEvent.ACTION_UP && grid.focusIndex() >= 0 && !grid.isMoving()) {
+                longPressed(grid.tile(grid.focusIndex()), grid.focusIndex());
+            }
+            return true;
+        }
+        if (grid.key(e)) return true;
+        if (e.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+            // Home has nothing behind it; Back returns to the first row, like tvOS.
+            if (e.getAction() == KeyEvent.ACTION_UP && grid.row(grid.focusIndex()) > 0) grid.focusAt(0, false);
+            return true;
+        }
+        return super.dispatchKeyEvent(e);
     }
 
-    @Override
-    public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_MENU) {
-            View f = getCurrentFocus();
-            if (f != null && f.getTag(R_PKG) instanceof String) {
-                options((String) f.getTag(R_PKG));
+    /** The key that woke an idle full-screen shelf; its release is swallowed too. */
+    private int swallow = -1;
+
+    /** Keys while the artwork has the screen: left and right page, OK opens, anything else returns to the Dock. */
+    private boolean shelfKey(KeyEvent e) {
+        int code = e.getKeyCode();
+        boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
+        if (swallow == code && !down) {
+            swallow = -1;
+            return true;
+        }
+        if (!shelf.expanded()) return false;
+        if (shelf.passive()) {
+            if (down) {
+                swallow = code;
+                shelf.collapse(grid);
+            }
+            return true;
+        }
+        switch (code) {
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                if (down) shelf.next(code == KeyEvent.KEYCODE_DPAD_RIGHT ? 1 : -1, true);
                 return true;
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+            case KeyEvent.KEYCODE_ENTER:
+            case KeyEvent.KEYCODE_NUMPAD_ENTER:
+                if (!down && e.getRepeatCount() == 0) openTitle();
+                return true;
+            case KeyEvent.KEYCODE_DPAD_UP:
+                return true;
+            case KeyEvent.KEYCODE_HOME:
+                return false;
+            default:
+                if (down) swallow = code;
+                shelf.collapse(grid);
+                return true;
+        }
+    }
+
+    /** OK on a title: Stremio opens the title itself; other apps just open. */
+    private void openTitle() {
+        Feed.Item it = shelf.current();
+        Object key = shelf.key();
+        if (!(key instanceof String) || ((String) key).startsWith("#")) return;
+        String pkg = (String) key;
+        if (it != null && pkg.equals("com.stremio.one") && it.id.startsWith("tt")) {
+            try {
+                Intent i = new Intent(Intent.ACTION_VIEW,
+                    android.net.Uri.parse("stremio:///detail/" + it.type + "/" + it.id)).setPackage(pkg);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
+                launched = true;
+                return;
+            } catch (RuntimeException ignored) {
+                // Older Stremio: open it normally.
             }
         }
-        return super.onKeyDown(keyCode, event);
+        if (Apps.launch(this, pkg, null)) launched = true;
     }
 
-    // ---- grid -----------------------------------------------------------------------------------
-
-    private static final int R_PKG = 0x7f0f0001;
+    // ---- grid ---------------------------------------------------------------------------------
 
     private void build() {
         builtGeneration = Apps.generation;
-        grid.removeAllViews();
-        List<String> home = Apps.home(this);
-
-        // As many columns as fit at the chosen tile size, then stretch the tiles to fill the row.
-        int gap = dp(20);
-        int avail = getResources().getDisplayMetrics().widthPixels - dp(56 * 2 + 20);
-        int cols = Math.max(3, (avail + gap) / (dp(Look.tileMinDp()) + gap));
-        int tileW = (avail - gap * (cols - 1)) / cols, tileH = tileW * 96 / 150;
-
-        View focus = null;
-        LinearLayout row = null;
-        for (int i = 0; i < home.size(); i++) {
-            if (i % cols == 0) {
-                row = new LinearLayout(this);
-                row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setClipChildren(false);
-                LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-2, -2);
-                if (i > 0) rp.topMargin = dp(18);
-                grid.addView(row, rp);
+        List<String> home = preview != null ? preview : Apps.home(this);
+        if (classic != null) {
+            classic.build(home, preview != null);
+            return;
+        }
+        List<Tile> tiles = new ArrayList<>();
+        int w = grid.tileW, h = grid.tileH;
+        // Pictures are drawn at the zoomed size so a focused icon stays sharp.
+        int pw = Math.round(w * Tile.lift()), ph = Math.round(h * Tile.lift());
+        for (String pkg : home) {
+            if (!Apps.launchable(this, pkg)) continue;
+            Apps.App app = Apps.get(this, pkg);
+            tiles.add(new Tile(this, pkg, app.label, w, h, Art.tile(this, app, pw, ph)));
+        }
+        int apps = tiles.size();
+        if (Look.buttons <= 1) {
+            tiles.add(new Tile(this, APPS, "Apps", w, h, Art.folder(this, Apps.all(this), pw, ph)));
+        }
+        tiles.add(new Tile(this, CUSTOMIZE, "Customize", w, h, Art.glyph(false, pw, ph)));
+        if (Look.buttons == 0) tiles.add(new Tile(this, SETTINGS, "Settings", w, h, Art.glyph(true, pw, ph)));
+        grid.setTiles(tiles, apps);
+        if (Look.shelf == 0) {
+            // Start fetching titles for the Dock's apps so the first look is already filled.
+            for (int i = 0; i < Math.min(grid.cols, apps); i++) {
+                String src = Feed.source(this, (String) tiles.get(i).key);
+                if (src != null) Feed.prefetch(this, Feed.list(this, src, null), 2);
             }
-            String pkg = home.get(i);
-            View t = tile(pkg, tileW, tileH);
-            t.setTag("tile" + i);
-            LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(tileW, -2);
-            if (i % cols > 0) tp.leftMargin = gap;
-            row.addView(t, tp);
-            if (pkg.equals(lastPkg) || focus == null) focus = t;
         }
 
-        if (home.isEmpty()) {
-            TextView empty = new TextView(this);
-            empty.setText("No apps on this screen yet. Open “Add / remove apps” below.");
-            empty.setTextColor(Look.inkSoft);
-            empty.setTextSize(18);
-            grid.addView(empty);
-        }
+        int at = 0;
+        for (int i = 0; i < tiles.size(); i++) if (tiles.get(i).key.equals(lastKey)) at = i;
+        grid.focusAt(at, true);
+        if (apps == 0) Apps.toast(this, "No apps on the home screen yet. Open Apps to add some.", true);
+    }
 
-        chips.removeAllViews();
-        if (Look.buttons != 2) {
-            addChip(chips, chip("All apps", v -> startActivity(AppsActivity.intent(this, false))));
+    @Override
+    public void focused(Tile t, int index) {
+        lastKey = t.key;
+        if (Look.shelf == 2 || grid.row(index) != 0) return;
+        String key = (String) t.key;
+        Bitmap wash = washes.get(key);
+        if (wash == null) {
+            wash = Art.wash(t.picture());
+            washes.put(key, wash);
         }
-        addChip(chips, chip("Add / remove apps", v -> startActivity(AppsActivity.intent(this, true))));
-        addChip(chips, chip("Customize", v -> startActivity(new Intent(this, CustomizeActivity.class))));
-        if (Look.buttons == 0) {
-            addChip(chips, chip("Settings", v -> {
+        String src = Look.shelf == 0 && !key.startsWith("#") ? Feed.source(this, key) : null;
+        List<Feed.Item> items = null;
+        if (src != null) {
+            // Apps sharing a catalog start at different titles.
+            int offset = index * 3;
+            items = rotate(Feed.list(this, src, fresh -> shelf.itemsUpdated(key, rotate(fresh, offset))), offset);
+        }
+        shelf.showApp(key, t.name, items, wash);
+    }
+
+    private final java.util.Map<String, Bitmap> washes = new java.util.HashMap<>();
+
+    private static List<Feed.Item> rotate(List<Feed.Item> l, int by) {
+        List<Feed.Item> out = new ArrayList<>();
+        int n = l.size();
+        for (int i = 0; i < Math.min(n, 8); i++) out.add(l.get((i + by) % n));
+        return out;
+    }
+
+    @Override
+    public void clicked(Tile t, int index) {
+        String key = (String) t.key;
+        switch (key) {
+            case APPS:
+                open(AppsActivity.intent(this, false));
+                return;
+            case CUSTOMIZE:
+                open(new Intent(this, CustomizeActivity.class));
+                return;
+            case SETTINGS:
                 try {
-                    startActivity(new Intent(Settings.ACTION_SETTINGS));
+                    startActivity(new Intent(Settings.ACTION_SETTINGS), zoomFrom(t));
+                    launched = true;
                 } catch (RuntimeException e) {
                     Apps.toast(this, "Settings could not open", false);
                 }
-            }));
+                return;
+            default:
+                if (Apps.launch(this, key, zoomFrom(t))) launched = true;
+                else Apps.toast(this, t.name + " could not open", false);
         }
-
-        if (focus == null) focus = chips.getChildAt(0);
-        View target = focus;
-        target.requestFocus();
-        target.post(() -> placeGlow(target, true));
     }
 
-    private void addChip(LinearLayout chips, View chip) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-        if (chips.getChildCount() > 0) lp.leftMargin = dp(16);
-        chips.addView(chip, lp);
+    private void open(Intent i) {
+        startActivity(i);
+        overridePendingTransition(R.anim.screen_in, R.anim.home_out);
     }
 
-    private View tile(String pkg, int w, int h) {
-        Apps.App app = Apps.get(this, pkg);
-
-        LinearLayout tile = new LinearLayout(this);
-        tile.setOrientation(LinearLayout.VERTICAL);
-        tile.setGravity(Gravity.CENTER_HORIZONTAL);
-        tile.setFocusable(true);
-        tile.setDefaultFocusHighlightEnabled(false);
-        tile.setClipChildren(false);
-        tile.setTag(R_PKG, pkg);
-
-        FrameLayout card = new FrameLayout(this);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(18));
-        bg.setColor(Look.card);
-        card.setBackground(bg);
-        card.setClipToOutline(true);
-        tile.addView(card, new LinearLayout.LayoutParams(w, h));
-
-        ImageView icon = new ImageView(this);
-        icon.setImageDrawable(Apps.icon(this, app));
-        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        int iconSize = w * 54 / 150;
-        card.addView(icon, new FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER));
-
-        View tint = new View(this);
-        tint.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-            new int[] {0x00000000, (app.tint & 0x00ffffff) | 0x66000000}));
-        tint.setAlpha(0f);
-        card.addView(tint, new FrameLayout.LayoutParams(-1, h * 2 / 3, Gravity.BOTTOM));
-
-        View border = new View(this);
-        GradientDrawable ring = new GradientDrawable();
-        ring.setCornerRadius(dp(18));
-        ring.setColor(0);
-        ring.setStroke(dp(2), Look.ink);
-        border.setBackground(ring);
-        border.setAlpha(0f);
-        card.addView(border, new FrameLayout.LayoutParams(-1, -1));
-
-        TextView label = new TextView(this);
-        label.setText(app.label);
-        label.setTextColor(Look.inkSoft);
-        label.setTextSize(15);
-        if (Look.labels == 1) label.setVisibility(View.INVISIBLE);
-        label.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
-        label.setSingleLine(true);
-        label.setEllipsize(TextUtils.TruncateAt.END);
-        label.setGravity(Gravity.CENTER_HORIZONTAL);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-        lp.topMargin = dp(10);
-        if (Look.labels != 2) tile.addView(label, lp);
-
-        tile.setOnFocusChangeListener((v, has) -> {
-            float s = has && Look.zoom == 0 ? 1.07f : 1f;
-            v.animate().scaleX(s).scaleY(s).setDuration(EASE).start();
-            if (Look.wash == 0) tint.animate().alpha(has ? 1f : 0f).setDuration(EASE).start();
-            border.animate().alpha(has ? 1f : 0f).setDuration(EASE).start();
-            bg.setColor(has ? Look.cardFocus : Look.card);
-            label.setTextColor(has ? Look.ink : Look.inkSoft);
-            if (Look.labels == 1) label.setVisibility(has ? View.VISIBLE : View.INVISIBLE);
-            if (has) {
-                lastPkg = pkg;
-                ((GradientDrawable) glow.getBackground()).setColors(
-                    new int[] {(app.tint & 0x00ffffff) | 0x30000000, 0x00000000});
-                placeGlow(v, false);
-            }
-        });
-        tile.setOnClickListener(v -> {
-            if (!Apps.launch(this, pkg)) {
-                Apps.toast(this, app.label + " could not open", false);
-            }
-        });
-        tile.setOnLongClickListener(v -> {
-            options(pkg);
-            return true;
-        });
-        return tile;
+    /** The app's window grows out of its icon, as on tvOS. */
+    private Bundle zoomFrom(View v) {
+        if (Look.motion != 0) return null;
+        return ActivityOptions.makeScaleUpAnimation(v, 0, 0, v.getWidth(), v.getHeight()).toBundle();
     }
 
-    private TextView chip(String text, View.OnClickListener click) {
-        TextView c = new TextView(this);
-        c.setText(text);
-        c.setTextSize(15);
-        c.setTextColor(Look.inkSoft);
-        c.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
-        c.setPadding(dp(22), dp(11), dp(22), dp(11));
-        c.setFocusable(true);
-        c.setDefaultFocusHighlightEnabled(false);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(30));
-        bg.setColor(Look.card);
-        bg.setStroke(dp(2), Look.inkAlpha(0x38));
-        c.setBackground(bg);
-        c.setOnFocusChangeListener((v, has) -> {
-            c.setTextColor(has ? Look.ink : Look.inkSoft);
-            bg.setColor(has ? Look.cardFocus : Look.card);
-            bg.setStroke(dp(2), has ? Look.ink : Look.inkAlpha(0x38));
-            if (has) {
-                ((GradientDrawable) glow.getBackground()).setColors(new int[] {Look.inkAlpha(0x22), 0x00000000});
-                placeGlow(v, false);
-            }
-        });
-        c.setOnClickListener(click);
-        return c;
-    }
-
-    /** Centres the soft glow on a view, in root coordinates. */
-    private void placeGlow(View v, boolean jump) {
-        if (v == null || glow == null || Look.glow != 0) return;
-        if (v.getWidth() == 0) {
-            // Not laid out yet (fresh grid): try again after layout.
-            v.post(() -> placeGlow(v, jump));
+    @Override
+    public void longPressed(Tile t, int index) {
+        String key = (String) t.key;
+        if (key.startsWith("#")) {
+            Overlay.menu(this, t, t.name, new String[] {"Open", "Customize Home Screen"}, which -> {
+                if (which == 0) clicked(t, index);
+                else if (which == 1) open(new Intent(this, CustomizeActivity.class));
+            });
             return;
         }
-        int[] at = new int[2], root = new int[2];
-        v.getLocationInWindow(at);
-        ((View) glow.getParent()).getLocationInWindow(root);
-        float x = at[0] - root[0] + v.getWidth() / 2f - glow.getWidth() / 2f;
-        float y = at[1] - root[1] + v.getHeight() / 2f - glow.getHeight() / 2f;
-        if (jump || glow.getAlpha() == 0f) {
-            glow.animate().cancel();
-            glow.setTranslationX(x);
-            glow.setTranslationY(y);
-            glow.animate().alpha(1f).setDuration(300).start();
-        } else {
-            glow.animate().translationX(x).translationY(y).setDuration(280).start();
-        }
+        Overlay.menu(this, t, t.name,
+            new String[] {"Move", "Remove from Home Screen", "App Info", "Customize Home Screen"}, which -> {
+                if (which >= 0 && which <= 1 && preview != null) {
+                    Apps.toast(this, "This is a preview. Press Home to leave it first.", true);
+                    return;
+                }
+                switch (which) {
+                    case 0:
+                        grid.startMove();
+                        Apps.toast(this, "Move " + t.name + " with the arrows, then press OK", false);
+                        return;
+                    case 1:
+                        Apps.toggle(this, key);
+                        int next = index + 1 < grid.count() ? index + 1 : index - 1;
+                        lastKey = next >= 0 ? grid.tile(next).key : null;
+                        Apps.toast(this, t.name + " removed. Add it back from Apps.", true);
+                        build();
+                        return;
+                    case 2:
+                        Apps.appInfo(this, key);
+                        return;
+                    case 3:
+                        open(new Intent(this, CustomizeActivity.class));
+                        return;
+                    default:
+                }
+            });
     }
 
-    // ---- tile menu ------------------------------------------------------------------------------
+    private void startRearrange() {
+        if (preview != null || grid.count() == 0 || Apps.home(this).isEmpty()) return;
+        grid.focusAt(grid.focusIndex() >= 0 && grid.focusIndex() < grid.count()
+            && !((String) grid.tile(grid.focusIndex()).key).startsWith("#") ? grid.focusIndex() : 0, true);
+        if (((String) grid.tile(grid.focusIndex()).key).startsWith("#")) return;
+        grid.startMove();
+        Apps.toast(this, "Move " + grid.tile(grid.focusIndex()).name
+            + " with the arrows, then press OK. To move another app, hold OK on it and choose Move.", true);
+    }
 
-    private void options(String pkg) {
-        List<String> home = Apps.home(this);
-        int at = home.indexOf(pkg);
-        if (at < 0) return;
-        String label = Apps.get(this, pkg).label;
-        String[] items = {"Move left", "Move right", "Move to first place", "Remove from home", "App info"};
-        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle(label)
-            .setItems(items, (d, which) -> {
-                lastPkg = pkg;
-                switch (which) {
-                    case 0: Apps.move(this, pkg, at - 1); break;
-                    case 1: Apps.move(this, pkg, at + 1); break;
-                    case 2: Apps.move(this, pkg, 0); break;
-                    case 3:
-                        Apps.toggle(this, pkg);
-                        lastPkg = at + 1 < home.size() ? home.get(at + 1) : (at > 0 ? home.get(at - 1) : null);
-                        Apps.toast(this, label + " removed. Add it back in “Add / remove apps”.", true);
-                        break;
-                    default: Apps.appInfo(this, pkg); return;
-                }
-                build();
-            })
-            .show();
+    @Override
+    public boolean edge(int dx, int dy) {
+        // Up from the Dock: the Dock slides away and the titles get the screen.
+        if (dy < 0 && grid.row(grid.focusIndex()) == 0 && Look.shelf == 0 && shelf.hasItems()) {
+            shelf.expand(false, grid);
+            return true;
+        }
+        return false;
+    }
+
+    @Override
+    public void scrolled(float y) {
+        shelf.scrolled(y);
+    }
+
+    @Override
+    public void moved(List<Object> keys) {
+        List<String> order = new ArrayList<>();
+        for (Object k : keys) order.add((String) k);
+        Apps.save(this, order);
+        builtGeneration = Apps.generation;
     }
 }

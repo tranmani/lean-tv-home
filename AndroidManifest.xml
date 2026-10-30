@@ -62,6 +62,7 @@
 
         <activity
             android:name=".AppsActivity"
+            android:theme="@style/Screen"
             android:exported="false"
             android:excludeFromRecents="true"
             android:screenOrientation="landscape" />
@@ -80,6 +81,7 @@
         </activity>
         <activity
             android:name=".CustomizeActivity"
+            android:theme="@style/Screen"
             android:exported="false"
             android:excludeFromRecents="true"
             android:screenOrientation="landscape" />

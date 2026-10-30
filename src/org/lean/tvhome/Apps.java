@@ -124,11 +124,16 @@ final class Apps {
     }
 
     static boolean launch(Context c, String pkg) {
+        return launch(c, pkg, null);
+    }
+
+    /** Opens the app; {@code options} carries the launch animation (zoom out of the icon). */
+    static boolean launch(Context c, String pkg, android.os.Bundle options) {
         Intent i = intentFor(c, pkg);
         if (i == null) return false;
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
         try {
-            c.startActivity(i);
+            c.startActivity(i, options);
             return true;
         } catch (RuntimeException e) {
             return false;
@@ -156,19 +161,16 @@ final class Apps {
     }
 
     static void googleOffHelp(android.app.Activity a, Runnable after) {
-        new android.app.AlertDialog.Builder(a, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle("Turn Google TV home off")
-            .setMessage("Google TV has no button for this, so it takes one command from a computer "
+        Overlay.alert(a, "Turn Google TV Home Off",
+            "Google TV has no button for this, so it takes one command from a computer "
                 + "or phone with adb, on the same network:\n\n"
                 + "adb connect " + ipAddress(a) + "\n"
                 + "adb shell pm disable-user --user 0 " + GOOGLE_HOME + "\n\n"
                 + "After that the Home button opens Lean TV Home and Google TV home stops using memory. "
-                + "To undo: adb shell pm enable " + GOOGLE_HOME)
-            .setPositiveButton("OK", null)
-            .setOnDismissListener(d -> {
+                + "To undo: adb shell pm enable " + GOOGLE_HOME,
+            null, new String[] {"OK"}, w -> {
                 if (after != null) after.run();
-            })
-            .show();
+            });
     }
 
     /** The box's IPv4 address on the active network, or a placeholder. */

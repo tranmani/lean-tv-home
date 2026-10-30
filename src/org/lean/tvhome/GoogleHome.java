@@ -1,7 +1,6 @@
 package org.lean.tvhome;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 
@@ -26,18 +25,14 @@ final class GoogleHome {
             Apps.appInfo(a, Apps.GOOGLE_HOME);
             return;
         }
-        new AlertDialog.Builder(a, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-            .setTitle("Use Google TV home?")
-            .setMessage("The Home button will open Google TV's home. To come back, open "
-                + "“Lean TV Home” from Google TV's apps.")
-            .setPositiveButton("Switch", (d, w) -> {
+        Overlay.alert(a, "Use Google TV Home?", "The Home button will open Google TV's home. To come back, "
+                + "open “Lean TV Home” from Google TV's apps.", null, new String[] {"Switch", "Cancel"}, w -> {
+                if (w != 0) return;
                 Apps.setHomeEntry(a, false);
                 a.startActivity(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
                 a.finishAffinity();
-            })
-            .setNegativeButton("Cancel", null)
-            .show();
+            });
     }
 
     /** Call from onResume: continues the switch once the owner has pressed Enable. */
